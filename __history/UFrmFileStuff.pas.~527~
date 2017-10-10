@@ -1,0 +1,457 @@
+unit UFrmFileStuff;
+
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, ExtCtrls, StdCtrls, FileCtrl, Contnrs, StrUtils,IdHashMessageDigest,
+  IdGlobal, IdHash, ComCtrls, Menus, ShellAPI, GIFImg, CommCtrl;
+
+type
+  TFrmFileStuff = class(TForm)
+    PopupMenu1: TPopupMenu;
+    N1: TMenuItem;
+    GroupBox1: TGroupBox;
+    Splitter2: TSplitter;
+    Splitter3: TSplitter;
+    Splitter1: TSplitter;
+    Memo_Filepath: TMemo;
+    Panel2: TPanel;
+    Button_Filepath: TButton;
+    Button_Stop: TButton;
+    Button_condition: TButton;
+    GroupBox2: TGroupBox;
+    Image1: TImage;
+    ListView1: TListView;
+    Button_calcen: TButton;
+    GroupBox3: TGroupBox;
+    Panel1: TPanel;
+    Lab_info: TLabel;
+    Panel3: TPanel;
+    Label1: TLabel;
+    Label2: TLabel;
+    Label3: TLabel;
+    edt_suffix: TEdit;
+    memo_filter: TMemo;
+    procedure Button_FilepathClick(Sender: TObject);
+    procedure FormCreate(Sender: TObject);
+    procedure Memo_FilepathDblClick(Sender: TObject);
+    procedure FormShow(Sender: TObject);
+    procedure Button_StopClick(Sender: TObject);
+    procedure ListView1DblClick(Sender: TObject);
+    procedure N1Click(Sender: TObject);
+    procedure ListView1ColumnClick(Sender: TObject; Column: TListColumn);
+    procedure Button_calcenClick(Sender: TObject);
+    procedure Button_conditionClick(Sender: TObject);
+    procedure edt_suffixKeyPress(Sender: TObject; var Key: Char);
+    procedure Label2Click(Sender: TObject);
+    procedure memo_filterDblClick(Sender: TObject);
+    procedure Label3Click(Sender: TObject);
+  private
+    { Private declarations }
+    searchRec: TSearchRec;
+    dirs: TQueue;
+    pwidth : Integer;
+    needstop : Boolean;
+    FileNameList : TStringList;
+    filterstr : string;
+    procedure EnumFileInQueue(path: PChar; fileExt: string; fileList: TStringList);
+    procedure initListview;
+    procedure initLoadImage;
+    procedure collectfilter;
+    procedure QiPaoShowMessage(h:HWND;text,cap:string;IconType:integer=1;t:integer=1000;left:Integer=0;top:Integer=0);
+    function getMd5Str(filepath : string) : string;
+  public
+    { Public declarations }
+  end;
+
+
+var
+  FrmFileStuff: TFrmFileStuff;
+
+implementation
+
+{$R *.dfm}
+
+
+function CustomSortProc(Item1, Item2: TListItem; ColumnIndex: integer): integer; stdcall;
+begin
+  if ColumnIndex = 0 then
+  Result := CompareText(Item1.Caption,Item2.Caption)
+  else
+  Result := CompareText(Item1.SubItems[ColumnIndex-1],Item2.SubItems[ColumnIndex-1])
+end;
+
+procedure TFrmFileStuff.Button_calcenClick(Sender: TObject);
+begin
+  needstop := True;
+end;
+
+procedure TFrmFileStuff.Button_conditionClick(Sender: TObject);
+begin
+  if not Panel3.Visible then
+  begin
+    Panel3.Height := 397;
+  end
+  else
+  begin
+    Panel3.Height := 0;
+  end;
+  Panel3.Visible := not Panel3.Visible;
+
+end;
+
+procedure TFrmFileStuff.collectFilter;
+begin
+  //
+end;
+
+procedure TFrmFileStuff.edt_suffixKeyPress(Sender: TObject; var Key: Char);
+var str : string;
+begin
+  if (Key = #13) and (trim(edt_suffix.Text)<>'') then
+  begin
+    str := '.'+ trim(edt_suffix.Text) +';';
+    if memo_filter.Lines.Count = 0 then
+      filterstr := '';
+    if Pos(str, filterstr) <= 0 then
+    begin
+      filterstr := filterstr + str;
+      memo_filter.Lines.Add(str);
+    end;
+    if memo_filter.Lines.Count > 4 then
+      memo_filter.ScrollBars := ssVertical;
+    edt_suffix.Clear;
+    edt_suffix.SetFocus;
+  end;
+end;
+
+procedure TFrmFileStuff.Button_FilepathClick(Sender: TObject);
+begin
+  if not DirectoryExists(Memo_Filepath.Lines[0]) then
+    Exit;
+//  initLoadImage;
+//  ListView1.Visible := False;
+  Button_calcen.Visible := True;
+  needstop := False;
+  initListview;
+  FileNameList := TStringList.Create;
+  try
+    ListView1.Clear;
+    EnumFileInQueue(PChar(Memo_Filepath.Lines[0]), '.*', FileNameList);
+  except
+   on E: Exception do
+   begin
+    ShowMessage(e.Message);
+   end;
+  end;
+  FileNameList.Free;
+  Button_calcen.Visible := False;
+  Lab_info.Caption := '共' + IntToStr(ListView1.Items.Count) + '条记录.';
+//  ListView1.Visible := True;
+//  Image1.Visible := False;
+end;
+
+procedure TFrmFileStuff.initLoadImage;
+var objImg : TImage;
+  objGif : TGIFImage;
+begin
+  objImg := TImage.Create(GroupBox2);
+  objImg.Parent := GroupBox2;
+
+  objGif := TGIFImage.Create;
+  objGif.LoadFromFile(ExtractFileDir(ParamStr(0)) + '\loading.gif');
+  Image1.Picture.Assign(objGif);
+  TGIFImage(Image1.Picture.Graphic).Animate := True;
+end;
+
+procedure TFrmFileStuff.FormCreate(Sender: TObject);
+begin
+  Memo_Filepath.Create(Self);
+  Memo_Filepath.Lines.Clear;
+  Memo_Filepath.Lines.Add('将文件夹路径粘贴到此处或者双击选择文件夹');
+  needstop := False;
+end;
+
+procedure TFrmFileStuff.FormShow(Sender: TObject);
+begin
+//  self.Position := poScreenCenter;
+//  AnimateWindow(Self.Handle, 200, AW_BLEND + AW_HOR_NEGATIVE);
+  initListview;
+  memo_filter.Clear;
+  memo_filter.Hint := filterstr;
+  memo_filter.ShowHint := True;
+end;
+
+procedure TFrmFileStuff.initListview;
+var i : Integer;
+begin
+  ListView1.Clear;
+  ListView1.Columns.Clear;
+  i := 0;
+  while i < 4 do
+  begin
+    ListView1.Columns.Add;
+    Inc(i);
+  end;
+  ListView1.Columns.Items[0].Caption:='ID';
+  ListView1.Columns.Items[0].Width := 50;
+  ListView1.Columns.Items[1].Caption:='FilePath';
+  ListView1.Columns.Items[1].Width := 100;
+  ListView1.Columns.Items[2].Caption:='FileName';
+  ListView1.Columns.Items[2].Width := 200;
+  ListView1.Columns.Items[3].Caption:='MD5';
+  ListView1.Columns.Items[3].Width := 300;
+  Listview1.ViewStyle := vsreport;
+  Listview1.GridLines := true;
+end;
+
+procedure TFrmFileStuff.Memo_FilepathDblClick(Sender: TObject);
+var strPath : string;
+begin
+  if (SelectDirectory('请选择文件夹路径', '', strPath)) then
+  begin
+    Memo_Filepath.Lines.Clear;
+    Memo_Filepath.Lines.Add(strPath);
+  end;
+end;
+
+procedure TFrmFileStuff.memo_filterDblClick(Sender: TObject);
+begin
+  if memo_filter.Lines.Count = 0 then
+    Exit;
+  Delete(filterstr,Pos(memo_filter.SelText,filterstr),Length(memo_filter.SelText));
+  memo_filter.Lines.Delete(memo_filter.Lines.IndexOf(memo_filter.SelText));
+end;
+
+procedure TFrmFileStuff.N1Click(Sender: TObject);
+begin
+  if ListView1.Selected <> nil then
+    ShellExecute(Handle,'open','Explorer.exe',PWideChar(ListView1.Selected.SubItems.Strings[0]),nil,1);
+end;
+
+procedure TFrmFileStuff.Button_StopClick(Sender: TObject);
+begin
+  needstop := True;
+  ListView1.Clear;
+  Memo_Filepath.Clear;
+end;
+
+procedure TFrmFileStuff.EnumFileInQueue(path: PChar; fileExt: string; fileList: TStringList);
+var
+   found: Integer;
+   tmpStr: string;
+   curDir: string;
+   pszDir: PChar;
+   filepath : string;
+   count,i : Integer;
+   filterlist : TStringList;
+begin
+  dirs := TQueue.Create; //创建目录队列
+  dirs.Push(path); //将起始搜索路径入队
+  pszDir := dirs.Pop;
+  curDir := StrPas(pszDir); //出队
+  {开始遍历,直至队列为空(即没有目录需要遍历)}
+  if not DirectoryExists(path) then
+  Exit;
+  count := 0;
+  if Trim(filterstr) = '' then
+    filterstr := '.*;';
+  filterlist := TStringList.Create;
+  filterlist.Delimiter := ';';
+  filterlist.DelimitedText := filterstr;
+
+  while (True) do
+  begin
+    if needstop then
+      Break;
+    application.ProcessMessages;
+    //加上搜索后缀,得到类似'c:\*.*' 、'c:\windows\*.*'的搜索路径
+    tmpStr := curDir + '\*.*';
+    //在当前目录查找第一个文件、子目录
+    found := FindFirst(tmpStr, faAnyFile, searchRec);
+    while found = 0 do //找到了一个文件或目录后
+    begin
+      //如果找到的是个目录
+      if (searchRec.Attr and faDirectory) <> 0 then
+      begin
+      {在搜索非根目录(C:\、D:\)下的子目录时会出现'.','..'的"虚拟目录"
+      大概是表示上层目录和下层目录吧。。。要过滤掉才可以}
+        if (searchRec.Name <> '.') and (searchRec.Name <> '..') then
+        begin
+           {由于查找到的子目录只有个目录名，所以要添上上层目录的路径
+            searchRec.Name = 'Windows';
+            tmpStr:='c:\Windows';
+            加个断点就一清二楚了
+           }
+           tmpStr := curDir + '\' + searchRec.Name;
+           {将搜索到的目录入队。让它先晾着。
+            因为TQueue里面的数据只能是指针,所以要把string转换为PChar
+            同时使用StrNew函数重新申请一个空间存入数据，否则会使已经进
+            入队列的指针指向不存在或不正确的数据(tmpStr是局部变量)。}
+           dirs.Push(StrNew(PChar(tmpStr)));
+        end;
+      end
+      else //如果找到的是个文件
+      begin
+         {Result记录着搜索到的文件数。可是我是用CreateThread创建线程
+          来调用函数的，不知道怎么得到这个返回值。。。我不想用全局变量}
+        //把找到的文件加到Memo控件
+        for i := 0 to filterlist.Count-1 do
+        begin
+//          if Pos(filterlist[i],ExtractFileExt(searchRec.Name))>0 then
+          if filterlist[i] = '.*' then
+          begin
+//            if SameText(RightStr(curDir + '\' + searchRec.Name, Length(fileExt)), fileExt) then
+//            begin
+              filepath := curDir + '\' + searchRec.Name;
+              fileList.Add(filepath);
+              with listview1.items.add do
+              begin
+                caption:= IntToStr(count);
+                subitems.add(curDir);
+                subitems.add(searchRec.Name);
+                subitems.add(getMd5Str(filepath));
+              end;
+              Inc(count);
+//            end;
+          end;
+          if filterlist[i] = ExtractFileExt(searchRec.Name) then
+          begin
+            filepath := curDir + '\' + searchRec.Name;
+            fileList.Add(filepath);
+            with listview1.items.add do
+            begin
+              caption:= IntToStr(count);
+              subitems.add(curDir);
+              subitems.add(searchRec.Name);
+              subitems.add(getMd5Str(filepath));
+            end;
+            Inc(count);
+          end;
+
+        end;
+
+      end;
+      //查找下一个文件或目录
+      found := FindNext(searchRec);
+    end;
+    {当前目录找到后，如果队列中没有数据，则表示全部找到了；
+      否则就是还有子目录未查找，取一个出来继续查找。}
+    if dirs.Count > 0 then
+    begin
+       pszDir := dirs.Pop;
+       curDir := StrPas(pszDir);
+       StrDispose(pszDir);
+    end
+    else
+       break;
+  end;
+  //释放资源
+  dirs.Free;
+  FindClose(searchRec);
+end;
+
+function TFrmFileStuff.getMd5Str(filepath: string) : string;
+var
+    AMD5:TIdHashMessageDigest5;
+begin
+  try
+    AMD5:=TIdHashMessageDigest5.Create;
+    Result:=AMD5.HashStringAsHex(filepath,TEncoding.UTF8);
+  finally
+     AMD5.Free;
+  end;
+end;
+
+procedure TFrmFileStuff.Label2Click(Sender: TObject);
+var str : string;
+begin
+  if trim(edt_suffix.Text) = '' then
+    Exit;
+  str := '.'+ trim(edt_suffix.Text) +';';
+  if memo_filter.Lines.Count = 0 then
+      filterstr := '';
+  if Pos(str, filterstr) <= 0 then
+  begin
+    filterstr := filterstr + str;
+    memo_filter.Lines.Add(str);
+  end;
+  if memo_filter.Lines.Count > 4 then
+    memo_filter.ScrollBars := ssVertical;
+  edt_suffix.Clear;
+  edt_suffix.SetFocus;
+end;
+
+procedure TFrmFileStuff.Label3Click(Sender: TObject);
+begin
+  memo_filter.Clear;
+  filterstr := '';
+end;
+
+procedure TFrmFileStuff.ListView1ColumnClick(Sender: TObject;
+  Column: TListColumn);
+begin
+  ListView1.CustomSort(@CustomSortProc,Column.Index);
+end;
+
+procedure TFrmFileStuff.ListView1DblClick(Sender: TObject);
+var
+  path : string;
+begin
+//  try
+//    if ListView1.Selected <> nil then
+//    ShowMessage(ListView1.Selected.SubItems.Strings[1]);
+//  except
+//    on E: Exception do
+//    begin
+//      ShowMessage(e.Message);
+//    end;
+//  end;
+
+end;
+
+///////////////////////----------参数说明---------------------//////////////////////
+
+//h:窗体中控件的句柄（用在某个控件上提示消息）（要调用的控件句柄）
+
+//text:要提示的文本
+
+//cap:提示框上的标题
+
+//IconType:提示框上显示的图标（共三个值。1、2、3分别为提示、警告、错误s）
+
+//t:消息停留的时间(以毫秒计算)
+
+//left: 消息框偏离控件的左距离，设为0则表示没有
+
+//top: 消息框偏离控件的顶距离，设为0则表示没有
+procedure TFrmFileStuff.QiPaoShowMessage(h:HWND;text,cap:string;IconType:integer=1;t:integer=1000;left:Integer=0;top:Integer=0);
+var
+ r : TRect;                       //是一个记录（Record），保存了矩形的（左上角右下角两个点）4个坐标或2个点的值。
+ hTooltip: Cardinal;    //Cardinal是无符号32位整数 ，取值0到4294967295范围。
+ ti: TToolInfo;
+begin
+  hToolTip := CreateWindow('Tooltips_Class32',nil,$40,0,0,0,0,0,0,hInstance,nil);
+  if hToolTip <> 0 then
+  begin
+    SetWindowPos(hToolTip, HWND_TOPMOST,0,0,0,0,SWP_NOMOVE or SWP_NOSIZE or SWP_NOACTIVATE);  //让气泡在最前面
+    ti.cbSize := SizeOf(TToolInfo);
+    ti.uFlags := TTF_IDISHWND or TTF_TRACK;
+    ti.hInst := hInstance;
+    ti.lpszText :=pchar(text);
+    SendMessage(hToolTip, TTM_ADDTOOL, 0, Integer(@ti));
+    if (IconType > 3) or (IconType < 0) then IconType:=0;
+    SendMessage(hToolTip,WM_USER + 32,IconType,Integer(pchar(cap)));
+    GetWindowRect(H,R);             //获取指定控件的坐标,R.Right 、R.Left、R.Bottom、R.Top
+    r.Left:=r.Left-left;
+    r.Top:=r.Top-top;
+
+  // 定义气泡位置
+    SendMessage(hToolTip,TTM_TRACKPOSITION, 0, MAKELONG((r.Right - r.Left) div 2 + r.Left, (r.Bottom - r.Top) div 2 + r.Top));            SendMessage(hToolTip, TTM_TRACKACTIVATE, Integer(True), Integer(@ti));
+    Sleep(t);
+    DestroyWindow(hToolTip);
+  end;
+end;
+
+end.
